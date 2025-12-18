@@ -106,4 +106,130 @@ ANNs due to following 3 factors:
 	\item The unit received so much input that the ReLU model predicts more than one output spike per timestep. This can happen either because there are too many input spikes in one timestep or if some of the input weights are higher than the neuron threshold.
 	\item Due to the probabilistic nature of the spiking input, it can happen that a set of spikes over- or under-activate a specific feature set due to non-uniformity of the spike trains.
 \end{enumerate}
+
+\section{Weight Normalization as Operating-Regime Control}
+
+\subsection{Goal as Layerwise Constraints}
+Let layer $l$ have weights $W^{(l)}$ and a common IF threshold $V_{\mathrm{th}}^{(l)}$. In the rate-to-spike mapping already established earlier, a practical sufficient condition to avoid ``multi-spike-per-timestep'' distortion and to reduce under-activation is to keep \emph{typical} and \emph{worst-case} positive pre-activations within a controlled range:
+\begin{align}
+	a^{(l)}(x)              & = \left[ W^{(l)} a^{(l-1)}(x) \right]_+ ,                              \\
+	\max_i a^{(l)}_i(x)     & \lesssim V_{\mathrm{th}}^{(l)} \quad \text{(for relevant } x\text{)},  \\
+	\max_{i,j} W^{(l)}_{ij} & \lesssim V_{\mathrm{th}}^{(l)} \quad \text{(to limit per-spike jump)}.
+\end{align}
+Here $[z]_+ \triangleq \max(0,z)$ is the rectifier.
+
+\subsection{Model-based normalization}
+MBN uses only weights to upper-bound the \emph{maximum possible positive input} to each layer. Define for each post-synaptic unit $i$:
+\begin{equation}
+	s^{(l)}_i \triangleq \sum_j \max\!\bigl(0, W^{(l)}_{ij}\bigr),
+	\qquad
+	\alpha^{(l)}_{\mathrm{MBN}} \triangleq \max_i s^{(l)}_i .
+\end{equation}
+Then rescale the whole layer by
+\begin{equation}
+	W^{(l)} \leftarrow \frac{1}{\alpha^{(l)}_{\mathrm{MBN}}}\, W^{(l)}.
+\end{equation}
+Interpretation: this enforces a conservative bound so that even a maximally-active nonnegative input cannot drive any unit to require more than roughly one spike ``worth'' of output per discrete timestep (given the discretization), at the cost of potentially increasing the evidence integration time.
+
+\subsection{Data-based normalization}
+DBN estimates \emph{typical maxima} from the training set $\mathcal{D}$ (or a calibration set). Let
+\begin{equation}
+	a^{(l)}_{\max} \triangleq \max_{x\in\mathcal{D}} \max_i a^{(l)}_i(x),
+	\qquad
+	w^{(l)}_{\max} \triangleq \max_{i,j} W^{(l)}_{ij},
+	\qquad
+	\alpha^{(l)}_{\mathrm{DBN}} \triangleq \max\!\bigl(a^{(l)}_{\max},\, w^{(l)}_{\max}\bigr).
+\end{equation}
+Using a cumulative scale bookkeeping $\beta^{(l)}$ (with $\beta^{(0)} \!=\! 1$), apply
+\begin{equation}
+	\gamma^{(l)} \triangleq \frac{\alpha^{(l)}_{\mathrm{DBN}}}{\beta^{(l-1)}},
+	\qquad
+	W^{(l)} \leftarrow \frac{1}{\gamma^{(l)}}\, W^{(l)},
+	\qquad
+	\beta^{(l)} \leftarrow \alpha^{(l)}_{\mathrm{DBN}}.
+\end{equation}
+Interpretation: DBN targets the activation scale actually encountered, typically yielding faster convergence (shorter latency) than MBN while remaining robust to input-rate variations.
+
+\subsection{MBN vs.\ DBN at a glance}
+\begin{table}[h]
+	\centering
+	\caption{Normalization mechanisms (core idea only).}
+	\begin{tabular}{@{}p{0.18\linewidth}p{0.26\linewidth}p{0.27\linewidth}p{0.24\linewidth}@{}}
+		\toprule
+		Method                          & What it uses                       & Scaling objective                                                            & Typical effect                                                      \\
+		\midrule
+		MBN (Model-Based Normalization) & Weights only                       & Worst-case positive drive $\max_i \sum_j \max(0,W_{ij})$                     & Very conservative; may increase required integration time           \\
+		DBN (Data-Based Normalization)  & Training-set activations + weights & Typical max activation $\max a_i(x)$ plus per-spike jump bound $\max W_{ij}$ & Less conservative; often faster latency with near-lossless accuracy \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\section{Spiking Input and Readout Rules}
+
+\subsection{Poisson rate encoding}
+Given an input intensity $x_p \in [0,1]$ at pixel (or feature) $p$, the Poisson firing rate is
+\begin{equation}
+	r_p = r_{\max}\, x_p .
+\end{equation}
+With discrete timestep $\Delta t$, a convenient implementation is Bernoulli sampling:
+\begin{equation}
+	s_p[t] \sim \mathrm{Bernoulli}\!\left(r_p \Delta t\right),
+	\qquad
+	s_p[t]\in\{0,1\}.
+\end{equation}
+
+\subsection{Output decoding (Spike-count vs.\ First-spike)}
+Let $N_k(T)$ be the spike count of output neuron $k$ within a window of duration $T$.
+\begin{equation}
+	\hat{y}_{\mathrm{count}}(T) = \arg\max_k N_k(T).
+\end{equation}
+A latency-oriented alternative is the first-spike decision:
+\begin{equation}
+	\hat{y}_{\mathrm{first}} = \text{class index of the earliest output spike}.
+\end{equation}
+This exposes a direct latency--accuracy trade-off controlled by thresholds and input rates (next section).
+
+\section{Key Outcomes}
+
+\subsection{Accuracy after conversion}
+\begin{table}[h]
+	\centering
+	\caption{Reported MNIST accuracy of converted networks.}
+	\begin{tabular}{@{}lccc@{}}
+		\toprule
+		Model variant                                 & Input rate (Hz) & $V_{\mathrm{th}}$ & Accuracy (\%) \\
+		\midrule
+		ConvNet, ReLU rate-based reference            & --              & --                & 99.14         \\
+		ConvNet, best grid-searched IF                & 1000            & 20.0              & 99.12         \\
+		ConvNet, DBN with default threshold           & 400             & 1.0               & 99.10         \\
+		ConvNet, MBN with default threshold           & 1000            & 1.0               & 99.11         \\
+		\midrule
+		FCN (Fully-Connected Network), ReLU reference & --              & --                & 98.68         \\
+		FCN, best grid-searched IF                    & 200             & 4.0               & 98.48         \\
+		FCN, DBN with default threshold               & 1000            & 1.0               & 98.64         \\
+		FCN, MBN with default threshold               & 1000            & 1.0               & 98.61         \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{Observed normalization scaling factors (reported examples)}
+\begin{table}[h]
+	\centering
+	\caption{Example layerwise rescaling factors applied by normalization.}
+	\begin{tabular}{@{}lcc@{}}
+		\toprule
+		Network & MBN factors (layerwise)                                & DBN factors (layerwise)  \\
+		\midrule
+		FCN     & $0.08,\ 0.045$ (output layer not normalized in MBN)    & $0.37,\ 1.25,\ 0.8$      \\
+		ConvNet & $0.1657,\ 0.1238$ (output layer not normalized in MBN) & $0.1657,\ 1.0021,\ 1.19$ \\
+		\bottomrule
+	\end{tabular}
+\end{table}
+
+\subsection{Latency--accuracy notes (reported qualitative + anchor numbers)}
+DBN yields high accuracy across a broad range of input rates and typically converges faster than both (i) non-normalized networks tuned by a grid search and (ii) MBN networks, because MBN tends to increase effective thresholds layer-by-layer and thus requires longer evidence integration time.
+
+A representative anchor reported for FCN is that the data-normalized network approaches its peak accuracy after about $6\,\mathrm{ms}$ of simulated time (about $1.74\%$ error at that point). For ConvNet first-spike decoding, a low first-layer threshold (e.g., $V_{\mathrm{th}}\!=\!0.25$) produces output spikes within a few milliseconds, while a high threshold (e.g., $V_{\mathrm{th}}\!=\!20$) yields larger latency but exceeds roughly $98\%$ precision using only the first output spike.
+
+
 \end{document}
