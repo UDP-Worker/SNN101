@@ -1,0 +1,109 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}	
+\usepackage{amsmath,amsthm,amsfonts,amssymb,amscd}
+\usepackage{multirow,booktabs}
+\usepackage[table]{xcolor}
+\usepackage{fullpage}
+\usepackage{lastpage}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{mathrsfs}
+\usepackage{wrapfig}
+\usepackage{setspace}
+\usepackage{calc}
+\usepackage{multicol}
+\usepackage{cancel}
+\usepackage[retainorgcmds]{IEEEtrantools}
+\usepackage[margin=3cm]{geometry}
+\usepackage{amsmath}
+\newlength{\tabcont}
+\setlength{\parindent}{0.0in}
+\setlength{\parskip}{0.05in}
+\usepackage{empheq}
+\usepackage{framed}
+\usepackage[most]{tcolorbox}
+\usepackage{xcolor}
+\colorlet{shadecolor}{orange!15}
+\parindent 0in
+\parskip 12pt
+\geometry{margin=1in, headsep=0.25in}
+\theoremstyle{definition}
+\newtheorem{defn}{Definition}
+\newtheorem{reg}{Rule}
+\newtheorem{exer}{Exercise}
+\newtheorem{note}{Note}
+\begin{document}
+\setcounter{section}{0}
+\title{Fast-Classifying, High-Accuracy Spiking Deep
+	Networks Through Weight and Threshold Balancing}
+
+\thispagestyle{empty}
+
+\begin{center}
+	{\LARGE \bf Fast-Classifying, High-Accuracy Spiking Deep
+		Networks Through Weight and Threshold Balancing}\\
+
+\end{center}
+
+\section{TL;DR}
+This paper proposes a method to convert DNN trained by classical gradient methods to \
+SNN using weight and threshold balancing.
+
+The main steps are:
+\begin{enumerate}
+	\item Use ReLUs for all units of the network.
+	\item Fix the bias to zero throughout training, and train with backpropagation.
+	\item Directly map the weights from the ReLU network to a network of IF units.
+	\item Use weight normalization (see section III-C) to obtain near-lossless accuracy and faster convergence.
+\end{enumerate}
+
+\section{IF neuron is similar to ReLU activation function}
+
+Relu is defined as:
+\begin{equation}
+	y = \max(0,z) \quad z=\sum_{i}w_ix_i
+\end{equation}
+
+While IF neuron is defined as:
+\begin{equation}
+	\frac{du}{dt} = \sum_{i} \sum_{s \in S_i} w_i \delta(t - s)
+\end{equation}
+
+If the pre-synaptic spikes are Poisson spike trains with rates $r$,\
+for a time window T, the expected membrane potential of the IF neuron is:
+\begin{equation}
+	\mathbb{E}\left[\frac{du}{dt} \right] \approx \sum_{i} w_i r_i
+\end{equation}
+
+Now we show that the ReLU can be considered a firing rate approximation\
+of an IF neuron with no refractory period and zero reset membrane potential.
+
+We notice that there is no leakage here, so as long as the input\
+surpasses the threshold, the neuron will fire a spike.\
+
+\begin{equation}
+	r_{\text{out}} \approx \frac{\sum_{i} w_i r_i}{u_{\text{th}}}
+\end{equation}
+which is exactly the same form as the ReLU activation function except for a scaling factor.
+
+Notice that the max operation appears here is due to zero reset potential.
+
+For a time window T, we have the total number of output spikes:
+\begin{equation}
+	N_{\text{out}} \approx T \cdot \frac{\max(0, \sum_{i} w_i r_i)}{u_{\text{th}}}
+\end{equation}
+
+For classification tasks, only the maximum activation of all units in the output layer is \
+of importance, allowing the overall rate to be scaled by a constant factor.
+
+\section{Solving over- and under-activation in converting ANN to SNN}
+
+Spiking neural networks can suffer from performance degradation when converted from\
+ANNs due to following 3 factors:
+
+\begin{enumerate}
+	\item The unit did not receive sufficient input to cross its threshold, meaning its rate is lower than it should be.
+	\item The unit received so much input that the ReLU model predicts more than one output spike per timestep. This can happen either because there are too many input spikes in one timestep or if some of the input weights are higher than the neuron threshold.
+	\item Due to the probabilistic nature of the spiking input, it can happen that a set of spikes over- or under-activate a specific feature set due to non-uniformity of the spike trains.
+\end{enumerate}
+\end{document}
